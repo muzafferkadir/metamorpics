@@ -1,101 +1,244 @@
-import Image from "next/image";
+'use client';
+
+import { useCallback, useState } from 'react';
+import { useDropzone } from 'react-dropzone';
+import imageCompression from 'browser-image-compression';
+import { saveAs } from 'file-saver';
+import heic2any from 'heic2any';
+
+const FORMAT_CATEGORIES = {
+  'Yaygın Formatlar': [
+    { value: 'image/jpeg', label: 'JPEG/JPG - En yaygın fotoğraf formatı' },
+    { value: 'image/png', label: 'PNG - Kayıpsız sıkıştırma' },
+    { value: 'image/gif', label: 'GIF - Animasyon desteği' },
+  ],
+  'Modern Web Formatları': [
+    { value: 'image/webp', label: 'WebP - Modern web için optimize' },
+    { value: 'image/avif', label: 'AVIF - AV1 tabanlı yeni nesil format' },
+    { value: 'image/heic', label: 'HEIC - Apple yüksek verimli format' },
+  ],
+  'Temel Formatlar': [
+    { value: 'image/bmp', label: 'BMP - Windows Bitmap' },
+    { value: 'image/tiff', label: 'TIFF - Yüksek kaliteli baskı' },
+  ]
+};
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+  const [quality, setQuality] = useState(80);
+  const [targetFormat, setTargetFormat] = useState('image/jpeg');
+  const [isConverting, setIsConverting] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [convertedBlob, setConvertedBlob] = useState<Blob | null>(null);
+  const [originalFileName, setOriginalFileName] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  const handleDownload = () => {
+    if (convertedBlob) {
+      const extension = targetFormat.split('/')[1];
+      const fileName = originalFileName 
+        ? `${originalFileName.split('.')[0]}.${extension}`
+        : `converted-image.${extension}`;
+      saveAs(convertedBlob, fileName);
+    }
+  };
+
+  const handleConvert = async () => {
+    if (!selectedFile) return;
+    
+    setIsConverting(true);
+    setPreviewUrl(null);
+    setConvertedBlob(null);
+
+    try {
+      // Görüntüyü sıkıştır
+      const compressedFile = await imageCompression(selectedFile, {
+        maxSizeMB: 1,
+        maxWidthOrHeight: 1920,
+        useWebWorker: true,
+      });
+
+      // Canvas'a çiz ve hedef formata dönüştür
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx?.drawImage(img, 0, 0);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              setConvertedBlob(blob);
+              setPreviewUrl(URL.createObjectURL(blob));
+            }
+            setIsConverting(false);
+          },
+          targetFormat,
+          quality / 100
+        );
+      };
+
+      img.src = URL.createObjectURL(compressedFile);
+    } catch (error) {
+      console.error('Dönüştürme hatası:', error);
+      setIsConverting(false);
+    }
+  };
+
+  const convertHeicToJpeg = async (file: File): Promise<File> => {
+    try {
+      const blob = await heic2any({
+        blob: file,
+        toType: 'image/jpeg',
+        quality: 0.8
+      });
+
+      return new File(
+        [Array.isArray(blob) ? blob[0] : blob], 
+        file.name.replace(/\.heic$/i, '.jpg'),
+        { type: 'image/jpeg' }
+      );
+    } catch (error) {
+      console.error('HEIC dönüştürme hatası:', error);
+      throw error;
+    }
+  };
+
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) return;
+
+    let file = acceptedFiles[0];
+    
+    // HEIC dosyasını otomatik olarak JPEG'e dönüştür
+    if (file.type === 'image/heic' || file.name.toLowerCase().endsWith('.heic')) {
+      try {
+        file = await convertHeicToJpeg(file);
+      } catch (error) {
+        console.error('HEIC dosyası dönüştürülemedi:', error);
+        return;
+      }
+    }
+
+    setOriginalFileName(file.name);
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setConvertedBlob(null);
+  }, []);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'image/*': [
+        // Yaygın Formatlar
+        '.jpg', '.jpeg', '.png', '.gif',
+        
+        // Modern Web Formatları
+        '.webp', '.avif', '.heic',
+        
+        // Temel Formatlar
+        '.bmp', '.tiff'
+      ]
+    },
+    maxFiles: 1
+  });
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white">
+      <main className="container mx-auto px-4 py-16 max-w-2xl">
+        <h1 className="text-4xl font-bold text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">
+          Metamorpics
+        </h1>
+        <p className="text-center text-gray-400 mb-12">Fotoğraflarınızı kolayca farklı formatlara dönüştürün</p>
+        
+        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
+          <div 
+            {...getRootProps()} 
+            className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all duration-200 ${
+              isDragActive 
+                ? 'border-blue-400 bg-blue-400/10' 
+                : 'border-gray-600 hover:border-blue-400 hover:bg-white/5'
+            }`}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            <input {...getInputProps()} />
+            <p className="text-gray-300 text-lg">
+              {isDragActive
+                ? "Bırakın..."
+                : "Dönüştürmek istediğiniz fotoğrafı sürükleyin veya seçin"}
+            </p>
+          </div>
+
+          {previewUrl && (
+            <div className="mt-6 rounded-xl overflow-hidden bg-gray-800 border border-gray-700">
+              <img 
+                src={previewUrl} 
+                alt="Önizleme" 
+                className="w-full h-auto object-contain max-h-[400px]"
+              />
+            </div>
+          )}
+          
+          <div className="mt-8 space-y-6">
+            <div className="space-y-4">
+              <label className="text-sm font-medium text-gray-300">Hedef Format:</label>
+              <select 
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={targetFormat}
+                onChange={(e) => setTargetFormat(e.target.value)}
+              >
+                {Object.entries(FORMAT_CATEGORIES).map(([category, formats]) => (
+                  <optgroup key={category} label={category}>
+                    {formats.map(format => (
+                      <option key={format.value} value={format.value}>
+                        {format.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-gray-300">Kalite: {quality}%</label>
+                <span className="text-sm text-blue-400 font-medium">{quality}%</span>
+              </div>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                value={quality}
+                onChange={(e) => setQuality(Number(e.target.value))}
+                className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+              />
+            </div>
+            
+            <div className="flex gap-4">
+              <button
+                className={`flex-1 py-3 rounded-xl font-medium transition-all duration-200 ${
+                  !selectedFile || isConverting
+                    ? 'bg-gray-700 cursor-not-allowed' 
+                    : 'bg-gradient-to-r from-blue-500 to-emerald-500 hover:opacity-90'
+                }`}
+                disabled={!selectedFile || isConverting}
+                onClick={handleConvert}
+              >
+                {isConverting ? 'Dönüştürülüyor...' : 'Dönüştür'}
+              </button>
+
+              {convertedBlob && (
+                <button
+                  onClick={handleDownload}
+                  className="flex-1 py-3 rounded-xl font-medium bg-gradient-to-r from-purple-500 to-pink-500 hover:opacity-90 transition-all duration-200"
+                >
+                  İndir
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
