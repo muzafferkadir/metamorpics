@@ -18,22 +18,41 @@ interface ImageCompressionOptions {
 }
 
 type ImageCompressionType = (file: File, options: ImageCompressionOptions) => Promise<File>;
-type Heic2AnyType = (options: { blob: Blob; toType?: string; quality?: number }) => Promise<Blob | Blob[]>;
+
+interface FormatOption {
+  value: string;
+  label: string;
+}
+
+interface FormatCategories {
+  [key: string]: FormatOption[];
+}
+
+interface HeicToOptions {
+  blob: Blob;
+  type: string;
+  quality?: number;
+}
+
+type HeicToType = (options: HeicToOptions) => Promise<Blob>;
+type IsHeicType = (file: File) => Promise<boolean>;
 
 // Client-side only imports
 let imageCompression: ImageCompressionType | null = null;
-let heic2any: Heic2AnyType | null = null;
+let heicTo: HeicToType | null = null;
+let isHeic: IsHeicType | null = null;
 
 if (typeof window !== 'undefined') {
   import('browser-image-compression').then(module => {
     imageCompression = module.default;
   });
-  import('heic2any').then(module => {
-    heic2any = module.default;
+  import('heic-to').then(module => {
+    heicTo = module.heicTo;
+    isHeic = module.isHeic;
   });
 }
 
-const FORMAT_CATEGORIES = {
+const STANDARD_FORMATS: FormatCategories = {
   'Yaygın Formatlar': [
     { value: 'image/jpeg', label: 'JPEG/JPG - En yaygın fotoğraf formatı' },
     { value: 'image/png', label: 'PNG - Kayıpsız sıkıştırma' },
@@ -42,11 +61,17 @@ const FORMAT_CATEGORIES = {
   'Modern Web Formatları': [
     { value: 'image/webp', label: 'WebP - Modern web için optimize' },
     { value: 'image/avif', label: 'AVIF - AV1 tabanlı yeni nesil format' },
-    { value: 'image/heic', label: 'HEIC - Apple yüksek verimli format' },
   ],
   'Temel Formatlar': [
     { value: 'image/bmp', label: 'BMP - Windows Bitmap' },
     { value: 'image/tiff', label: 'TIFF - Yüksek kaliteli baskı' },
+  ]
+};
+
+const HEIC_FORMATS: FormatCategories = {
+  'HEIC Dönüşüm Formatları': [
+    { value: 'image/jpeg', label: 'JPEG/JPG - En yaygın fotoğraf formatı' },
+    { value: 'image/png', label: 'PNG - Kayıpsız sıkıştırma' },
   ]
 };
 
@@ -56,9 +81,10 @@ export default function Home() {
   const [isConverting, setIsConverting] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [convertedBlob, setConvertedBlob] = useState<Blob | null>(null);
-  const [originalFileName, setOriginalFileName] = useState<string>('');
+  const [originalFileName, setOriginalFileName] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isClient, setIsClient] = useState(false);
+  const [isHeicFile, setIsHeicFile] = useState(false);
 
   useEffect(() => {
     setIsClient(true);
@@ -75,108 +101,99 @@ export default function Home() {
   };
 
   const handleConvert = async () => {
-    if (!selectedFile || !imageCompression) return;
+    if (!selectedFile) return;
     
     setIsConverting(true);
     setPreviewUrl(null);
     setConvertedBlob(null);
 
     try {
-      // Görüntüyü sıkıştır
-      const compressedFile = await imageCompression(selectedFile, {
-        maxSizeMB: 1,
-        maxWidthOrHeight: 1920,
-        useWebWorker: true,
-      });
+      if (isHeicFile && heicTo) {
+        const blob = await heicTo({
+          blob: selectedFile,
+          type: targetFormat,
+          quality: quality / 100
+        });
 
-      // Canvas'a çiz ve hedef formata dönüştür
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const img = new window.Image();
+        setConvertedBlob(blob);
+        setPreviewUrl(URL.createObjectURL(blob));
+      } else if (imageCompression) {
+        // Görüntüyü sıkıştır
+        const compressedFile = await imageCompression(selectedFile, {
+          maxSizeMB: 1,
+          maxWidthOrHeight: 1920,
+          useWebWorker: true,
+        });
 
-      img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx?.drawImage(img, 0, 0);
+        // Canvas'a çiz ve hedef formata dönüştür
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new window.Image();
 
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              setConvertedBlob(blob);
-              setPreviewUrl(URL.createObjectURL(blob));
-            }
-            setIsConverting(false);
-          },
-          targetFormat,
-          quality / 100
-        );
-      };
+        img.onload = () => {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx?.drawImage(img, 0, 0);
 
-      img.src = URL.createObjectURL(compressedFile);
+          canvas.toBlob(
+            (blob) => {
+              if (blob) {
+                setConvertedBlob(blob);
+                setPreviewUrl(URL.createObjectURL(blob));
+              }
+              setIsConverting(false);
+            },
+            targetFormat,
+            quality / 100
+          );
+        };
+
+        img.src = URL.createObjectURL(compressedFile);
+        return;
+      }
     } catch (error) {
       console.error('Dönüştürme hatası:', error);
+    } finally {
       setIsConverting(false);
-    }
-  };
-
-  const convertHeicToJpeg = async (file: File): Promise<File> => {
-    if (!heic2any) throw new Error('HEIC dönüştürücü yüklenemedi');
-
-    try {
-      const blob = await heic2any({
-        blob: file,
-        toType: 'image/jpeg',
-        quality: 0.8
-      });
-
-      return new File(
-        [Array.isArray(blob) ? blob[0] : blob], 
-        file.name.replace(/\.heic$/i, '.jpg'),
-        { type: 'image/jpeg' }
-      );
-    } catch (error) {
-      console.error('HEIC dönüştürme hatası:', error);
-      throw error;
     }
   };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
 
-    let file = acceptedFiles[0];
+    const file = acceptedFiles[0];
     
-    // HEIC dosyasını otomatik olarak JPEG'e dönüştür
-    if (file.type === 'image/heic' || file.name.toLowerCase().endsWith('.heic')) {
-      try {
-        file = await convertHeicToJpeg(file);
-      } catch (error) {
-        console.error('HEIC dosyası dönüştürülemedi:', error);
-        return;
+    try {
+      if (!isHeic) {
+        throw new Error('HEIC kontrol fonksiyonu yüklenemedi');
       }
-    }
 
-    setOriginalFileName(file.name);
-    setSelectedFile(file);
-    setPreviewUrl(URL.createObjectURL(file));
-    setConvertedBlob(null);
-  }, []);
+      const fileIsHeic = await isHeic(file);
+      setIsHeicFile(fileIsHeic);
+      setTargetFormat(fileIsHeic ? 'image/jpeg' : targetFormat);
+      
+      setOriginalFileName(file.name);
+      setSelectedFile(file);
+      setPreviewUrl(URL.createObjectURL(file));
+      setConvertedBlob(null);
+    } catch (error) {
+      console.error('Dosya kontrolü sırasında hata:', error);
+    }
+  }, [targetFormat]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
       'image/*': [
-        // Yaygın Formatlar
         '.jpg', '.jpeg', '.png', '.gif',
-        
-        // Modern Web Formatları
         '.webp', '.avif', '.heic',
-        
-        // Temel Formatlar
         '.bmp', '.tiff'
       ]
     },
     maxFiles: 1
   });
+
+  const formats = isHeicFile ? HEIC_FORMATS : STANDARD_FORMATS;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 text-white">
@@ -226,9 +243,9 @@ export default function Home() {
                   value={targetFormat}
                   onChange={(e) => setTargetFormat(e.target.value)}
                 >
-                  {Object.entries(FORMAT_CATEGORIES).map(([category, formats]) => (
+                  {Object.entries(formats).map(([category, formatOptions]) => (
                     <optgroup key={category} label={category}>
-                      {formats.map(format => (
+                      {formatOptions.map(format => (
                         <option key={format.value} value={format.value}>
                           {format.label}
                         </option>
