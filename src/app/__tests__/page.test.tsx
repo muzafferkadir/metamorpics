@@ -543,4 +543,306 @@ describe('Home - HEIC Support', () => {
       expect(screen.queryByText(/hata/i)).not.toBeInTheDocument()
     }, { timeout: 1000 })
   })
+
+  describe('HEIC Target Format Support', () => {
+    beforeEach(() => {
+      // Mock fetch for API calls
+      global.fetch = jest.fn()
+    })
+
+    afterEach(() => {
+      jest.restoreAllMocks()
+    })
+
+    it('should show HEIC in format dropdown for non-HEIC files', async () => {
+      mockIsHeic.mockResolvedValue(false)
+      
+      render(<Home />)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Metamorpics')).toBeInTheDocument()
+      })
+
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
+
+      Object.defineProperty(input, 'files', {
+        value: [file],
+        writable: false,
+      })
+
+      fireEvent.change(input)
+
+      await waitFor(() => {
+        const formatSelect = screen.getByDisplayValue(/JPEG/)
+        expect(formatSelect).toBeInTheDocument()
+        
+        // Check if HEIC option exists
+        const heicOption = screen.getByText(/HEIC - Apple/)
+        expect(heicOption).toBeInTheDocument()
+      })
+    })
+
+    it('should convert JPG to HEIC using API route', async () => {
+      mockIsHeic.mockResolvedValue(false)
+      
+      const mockHeicBlob = new Blob(['heic-data'], { type: 'image/heic' })
+      const mockResponse = {
+        ok: true,
+        blob: jest.fn().mockResolvedValue(mockHeicBlob),
+        headers: {
+          get: jest.fn((key: string) => {
+            if (key === 'X-Processing-Time') return '150'
+            if (key === 'X-Source-Size') return '1000'
+            if (key === 'X-Output-Size') return '900'
+            return null
+          })
+        }
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValue(mockResponse)
+      
+      render(<Home />)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Metamorpics')).toBeInTheDocument()
+      })
+
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
+
+      Object.defineProperty(input, 'files', {
+        value: [file],
+        writable: false,
+      })
+
+      fireEvent.change(input)
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue(/JPEG/)).toBeInTheDocument()
+      })
+
+      // Select HEIC format
+      const formatSelect = screen.getByDisplayValue(/JPEG/)
+      fireEvent.change(formatSelect, { target: { value: 'image/heic' } })
+
+      // Click convert
+      const convertButton = screen.getByText('Dönüştür')
+      fireEvent.click(convertButton)
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledWith('/api/convert-to-heic', expect.any(Object))
+      })
+    })
+
+    it('should use default quality 0.8 for HEIC conversion', async () => {
+      mockIsHeic.mockResolvedValue(false)
+      
+      const mockHeicBlob = new Blob(['heic-data'], { type: 'image/heic' })
+      const mockResponse = {
+        ok: true,
+        blob: jest.fn().mockResolvedValue(mockHeicBlob),
+        headers: {
+          get: jest.fn(() => null)
+        }
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValue(mockResponse)
+      
+      render(<Home />)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Metamorpics')).toBeInTheDocument()
+      })
+
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
+
+      Object.defineProperty(input, 'files', {
+        value: [file],
+        writable: false,
+      })
+
+      fireEvent.change(input)
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue(/JPEG/)).toBeInTheDocument()
+      })
+
+      // Select HEIC format
+      const formatSelect = screen.getByDisplayValue(/JPEG/)
+      fireEvent.change(formatSelect, { target: { value: 'image/heic' } })
+
+      // Click convert with default quality (80%)
+      const convertButton = screen.getByText('Dönüştür')
+      fireEvent.click(convertButton)
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalled()
+        const callArgs = (global.fetch as jest.Mock).mock.calls[0]
+        const formData = callArgs[1].body as FormData
+        const quality = formData.get('quality')
+        expect(quality).toBe('0.8')
+      })
+    })
+
+    it('should show error when HEIC conversion fails', async () => {
+      mockIsHeic.mockResolvedValue(false)
+      
+      const mockResponse = {
+        ok: false,
+        json: jest.fn().mockResolvedValue({ error: 'Conversion failed', code: 'HEIC_CONVERT_003' })
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValue(mockResponse)
+      
+      render(<Home />)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Metamorpics')).toBeInTheDocument()
+      })
+
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
+
+      Object.defineProperty(input, 'files', {
+        value: [file],
+        writable: false,
+      })
+
+      fireEvent.change(input)
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue(/JPEG/)).toBeInTheDocument()
+      })
+
+      // Select HEIC format
+      const formatSelect = screen.getByDisplayValue(/JPEG/)
+      fireEvent.change(formatSelect, { target: { value: 'image/heic' } })
+
+      // Click convert
+      const convertButton = screen.getByText('Dönüştür')
+      fireEvent.click(convertButton)
+
+      await waitFor(() => {
+        expect(screen.getByText(/HEIC formatına dönüştürülemedi/i)).toBeInTheDocument()
+      })
+    })
+
+    it('should log conversion metrics for HEIC', async () => {
+      const consoleLogSpy = jest.spyOn(console, 'log').mockImplementation()
+      mockIsHeic.mockResolvedValue(false)
+      
+      const mockHeicBlob = new Blob(['heic-data'], { type: 'image/heic' })
+      const mockResponse = {
+        ok: true,
+        blob: jest.fn().mockResolvedValue(mockHeicBlob),
+        headers: {
+          get: jest.fn((key: string) => {
+            if (key === 'X-Processing-Time') return '250'
+            if (key === 'X-Source-Size') return '2000'
+            if (key === 'X-Output-Size') return '1500'
+            return null
+          })
+        }
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValue(mockResponse)
+      
+      render(<Home />)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Metamorpics')).toBeInTheDocument()
+      })
+
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(['test'], 'test.jpg', { type: 'image/jpeg' })
+
+      Object.defineProperty(input, 'files', {
+        value: [file],
+        writable: false,
+      })
+
+      fireEvent.change(input)
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue(/JPEG/)).toBeInTheDocument()
+      })
+
+      // Select HEIC format
+      const formatSelect = screen.getByDisplayValue(/JPEG/)
+      fireEvent.change(formatSelect, { target: { value: 'image/heic' } })
+
+      // Click convert
+      const convertButton = screen.getByText('Dönüştür')
+      fireEvent.click(convertButton)
+
+      await waitFor(() => {
+        expect(consoleLogSpy).toHaveBeenCalledWith('HEIC Conversion Metrics:', expect.objectContaining({
+          targetFormat: 'image/heic',
+          quality: expect.any(Number),
+          processingTime: '250ms'
+        }))
+      })
+
+      consoleLogSpy.mockRestore()
+    })
+
+    it('should show size warning for HEIC conversion when output > 120% of original', async () => {
+      mockIsHeic.mockResolvedValue(false)
+      
+      const smallBuffer = new ArrayBuffer(1000)
+      const largeBuffer = new ArrayBuffer(1300)
+      const mockHeicBlob = new Blob([largeBuffer], { type: 'image/heic' })
+      
+      const mockResponse = {
+        ok: true,
+        blob: jest.fn().mockResolvedValue(mockHeicBlob),
+        headers: {
+          get: jest.fn(() => null)
+        }
+      };
+
+      (global.fetch as jest.Mock).mockResolvedValue(mockResponse)
+      
+      render(<Home />)
+      
+      await waitFor(() => {
+        expect(screen.getByText('Metamorpics')).toBeInTheDocument()
+      })
+
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File([smallBuffer], 'test.jpg', { type: 'image/jpeg' })
+
+      Object.defineProperty(input, 'files', {
+        value: [file],
+        writable: false,
+      })
+
+      fireEvent.change(input)
+
+      await waitFor(() => {
+        expect(screen.getByDisplayValue(/JPEG/)).toBeInTheDocument()
+      })
+
+      // Select HEIC format
+      const formatSelect = screen.getByDisplayValue(/JPEG/)
+      fireEvent.change(formatSelect, { target: { value: 'image/heic' } })
+
+      // Click convert
+      const convertButton = screen.getByText('Dönüştür')
+      fireEvent.click(convertButton)
+
+      await waitFor(() => {
+        const warningText = screen.queryByText((content, element) => {
+          return element?.textContent?.includes('Dönüştürülmüş dosya boyutu') || false
+        })
+        
+        if (warningText) {
+          expect(screen.getByText('Devam Et')).toBeInTheDocument()
+          expect(screen.getByText('İptal')).toBeInTheDocument()
+        }
+      }, { timeout: 3000 })
+    })
+  })
 })

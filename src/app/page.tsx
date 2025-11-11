@@ -62,6 +62,9 @@ const STANDARD_FORMATS: FormatCategories = {
     { value: 'image/webp', label: 'WebP - Modern web için optimize' },
     { value: 'image/avif', label: 'AVIF - AV1 tabanlı yeni nesil format' },
   ],
+  'Apple Formatları': [
+    { value: 'image/heic', label: 'HEIC - Apple yüksek verimli görüntü formatı' },
+  ],
   'Temel Formatlar': [
     { value: 'image/bmp', label: 'BMP - Windows Bitmap' },
     { value: 'image/tiff', label: 'TIFF - Yüksek kaliteli baskı' },
@@ -117,7 +120,52 @@ export default function Home() {
     }
 
     try {
-      if (isHeicFile && heicTo) {
+      // Check if target format is HEIC - use server-side conversion
+      if (targetFormat === 'image/heic') {
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        // Use default quality of 0.8 (80%) for HEIC as per PRD requirements
+        const heicQuality = quality / 100 || 0.8;
+        formData.append('quality', heicQuality.toString());
+
+        const response = await fetch('/api/convert-to-heic', {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'HEIC conversion failed');
+        }
+
+        const blob = await response.blob();
+        const originalSize = selectedFile.size;
+        const convertedSize = blob.size;
+        const sizeIncrease = (convertedSize / originalSize) * 100;
+
+        // Log conversion metrics
+        const processingTime = response.headers.get('X-Processing-Time');
+        console.log('HEIC Conversion Metrics:', {
+          sourceSize: originalSize,
+          outputSize: convertedSize,
+          processingTime: processingTime ? `${processingTime}ms` : 'unknown',
+          quality: heicQuality,
+          targetFormat: 'image/heic'
+        });
+
+        if (!skipSizeWarning && sizeIncrease > 120) {
+          setPendingConversion({ blob, originalSize });
+          setShowSizeWarning(true);
+          setWarningMessage(
+            `Dönüştürülmüş dosya boyutu orijinalden %${Math.round(sizeIncrease - 100)} daha büyük. Devam etmek istiyor musunuz?`
+          );
+          setIsConverting(false);
+          return;
+        }
+
+        setConvertedBlob(blob);
+        setPreviewUrl(URL.createObjectURL(blob));
+      } else if (isHeicFile && heicTo) {
         // For HEIC, ensure quality is at least 0.85 (85%)
         const heicQuality = Math.max(quality / 100, 0.85);
         const blob = await heicTo({
@@ -179,7 +227,9 @@ export default function Home() {
       }
     } catch (error) {
       console.error('Dönüştürme hatası:', error);
-      if (isHeicFile) {
+      if (targetFormat === 'image/heic') {
+        setErrorMessage('HEIC formatına dönüştürülemedi. Lütfen dosya boyutunu kontrol edin veya başka format deneyin.');
+      } else if (isHeicFile) {
         setErrorMessage('HEIC dönüştürülemedi, lütfen başka format deneyin');
       } else {
         setErrorMessage('Dosya dönüştürülemedi, lütfen tekrar deneyin');

@@ -26,24 +26,27 @@ jest.mock('heic-to', () => ({
   isHeic: jest.fn(),
 }))
 
-// Mock window.Image
-global.Image = class {
-  constructor() {
-    setTimeout(() => {
-      this.onload && this.onload()
-    }, 0)
+// Only set up browser mocks if in a browser-like environment
+if (typeof HTMLCanvasElement !== 'undefined') {
+  // Mock window.Image
+  global.Image = class {
+    constructor() {
+      setTimeout(() => {
+        this.onload && this.onload()
+      }, 0)
+    }
   }
+
+  // Mock URL.createObjectURL
+  global.URL.createObjectURL = jest.fn(() => 'blob:mock-url')
+  global.URL.revokeObjectURL = jest.fn()
+
+  // Mock canvas
+  HTMLCanvasElement.prototype.getContext = jest.fn(() => ({
+    drawImage: jest.fn(),
+  }))
+
+  HTMLCanvasElement.prototype.toBlob = jest.fn((callback) => {
+    callback(new Blob(['mock'], { type: 'image/jpeg' }))
+  })
 }
-
-// Mock URL.createObjectURL
-global.URL.createObjectURL = jest.fn(() => 'blob:mock-url')
-global.URL.revokeObjectURL = jest.fn()
-
-// Mock canvas
-HTMLCanvasElement.prototype.getContext = jest.fn(() => ({
-  drawImage: jest.fn(),
-}))
-
-HTMLCanvasElement.prototype.toBlob = jest.fn((callback) => {
-  callback(new Blob(['mock'], { type: 'image/jpeg' }))
-})
