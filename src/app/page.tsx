@@ -85,6 +85,10 @@ export default function Home() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isClient, setIsClient] = useState(false);
   const [isHeicFile, setIsHeicFile] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [warningMessage, setWarningMessage] = useState<string | null>(null);
+  const [showSizeWarning, setShowSizeWarning] = useState(false);
+  const [pendingConversion, setPendingConversion] = useState<{blob: Blob, originalSize: number} | null>(null);
 
   useEffect(() => {
     setIsClient(true);
@@ -100,20 +104,42 @@ export default function Home() {
     }
   };
 
-  const handleConvert = async () => {
+  const handleConvert = async (skipSizeWarning = false) => {
     if (!selectedFile) return;
     
     setIsConverting(true);
-    setPreviewUrl(null);
-    setConvertedBlob(null);
+    setErrorMessage(null);
+    setWarningMessage(null);
+    setShowSizeWarning(false);
+    if (!skipSizeWarning) {
+      setPreviewUrl(null);
+      setConvertedBlob(null);
+    }
 
     try {
       if (isHeicFile && heicTo) {
+        // For HEIC, ensure quality is at least 0.85 (85%)
+        const heicQuality = Math.max(quality / 100, 0.85);
         const blob = await heicTo({
           blob: selectedFile,
           type: targetFormat,
-          quality: quality / 100
+          quality: heicQuality
         });
+
+        // Check if converted size exceeds 120% of original
+        const originalSize = selectedFile.size;
+        const convertedSize = blob.size;
+        const sizeIncrease = (convertedSize / originalSize) * 100;
+
+        if (!skipSizeWarning && sizeIncrease > 120) {
+          setPendingConversion({ blob, originalSize });
+          setShowSizeWarning(true);
+          setWarningMessage(
+            `Dönüştürülmüş dosya boyutu orijinalden %${Math.round(sizeIncrease - 100)} daha büyük. Devam etmek istiyor musunuz?`
+          );
+          setIsConverting(false);
+          return;
+        }
 
         setConvertedBlob(blob);
         setPreviewUrl(URL.createObjectURL(blob));
@@ -153,9 +179,30 @@ export default function Home() {
       }
     } catch (error) {
       console.error('Dönüştürme hatası:', error);
+      if (isHeicFile) {
+        setErrorMessage('HEIC dönüştürülemedi, lütfen başka format deneyin');
+      } else {
+        setErrorMessage('Dosya dönüştürülemedi, lütfen tekrar deneyin');
+      }
     } finally {
       setIsConverting(false);
     }
+  };
+
+  const handleAcceptSizeWarning = () => {
+    if (pendingConversion) {
+      setConvertedBlob(pendingConversion.blob);
+      setPreviewUrl(URL.createObjectURL(pendingConversion.blob));
+      setShowSizeWarning(false);
+      setWarningMessage(null);
+      setPendingConversion(null);
+    }
+  };
+
+  const handleCancelSizeWarning = () => {
+    setShowSizeWarning(false);
+    setWarningMessage(null);
+    setPendingConversion(null);
   };
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
@@ -163,12 +210,28 @@ export default function Home() {
 
     const file = acceptedFiles[0];
     
+    // Reset error and warning messages
+    setErrorMessage(null);
+    setWarningMessage(null);
+    setShowSizeWarning(false);
+    setPendingConversion(null);
+    
     try {
       if (!isHeic) {
         throw new Error('HEIC kontrol fonksiyonu yüklenemedi');
       }
 
       const fileIsHeic = await isHeic(file);
+      
+      // Validate HEIC file size (max 20 MB)
+      if (fileIsHeic) {
+        const maxSizeBytes = 20 * 1024 * 1024; // 20 MB in bytes
+        if (file.size > maxSizeBytes) {
+          setErrorMessage('Dosya boyutu maksimum 20 MB olmalı');
+          return;
+        }
+      }
+      
       setIsHeicFile(fileIsHeic);
       setTargetFormat(fileIsHeic ? 'image/jpeg' : targetFormat);
       
@@ -178,6 +241,7 @@ export default function Home() {
       setConvertedBlob(null);
     } catch (error) {
       console.error('Dosya kontrolü sırasında hata:', error);
+      setErrorMessage('Dosya yüklenirken bir hata oluştu');
     }
   }, [targetFormat]);
 
@@ -186,7 +250,7 @@ export default function Home() {
     accept: {
       'image/*': [
         '.jpg', '.jpeg', '.png', '.gif',
-        '.webp', '.avif', '.heic',
+        '.webp', '.avif', '.heic', '.heif',
         '.bmp', '.tiff'
       ]
     },
@@ -203,6 +267,32 @@ export default function Home() {
             Metamorpics
           </h1>
           <p className="text-center text-gray-400 mb-12">Fotoğraflarınızı kolayca farklı formatlara dönüştürün</p>
+          
+          {errorMessage && (
+            <div className="mb-6 bg-red-500/20 border border-red-500/50 rounded-xl p-4 text-red-200 text-center">
+              {errorMessage}
+            </div>
+          )}
+          
+          {warningMessage && showSizeWarning && (
+            <div className="mb-6 bg-yellow-500/20 border border-yellow-500/50 rounded-xl p-4">
+              <p className="text-yellow-200 text-center mb-4">{warningMessage}</p>
+              <div className="flex gap-4 justify-center">
+                <button
+                  onClick={handleAcceptSizeWarning}
+                  className="px-6 py-2 bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-medium rounded-lg transition-colors"
+                >
+                  Devam Et
+                </button>
+                <button
+                  onClick={handleCancelSizeWarning}
+                  className="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white font-medium rounded-lg transition-colors"
+                >
+                  İptal
+                </button>
+              </div>
+            </div>
+          )}
           
           <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-8 shadow-2xl border border-white/20">
             <div 
@@ -278,7 +368,7 @@ export default function Home() {
                       : 'bg-gradient-to-r from-blue-500 to-emerald-500 hover:opacity-90'
                   }`}
                   disabled={!selectedFile || isConverting}
-                  onClick={handleConvert}
+                  onClick={() => handleConvert()}
                 >
                   {isConverting ? 'Dönüştürülüyor...' : 'Dönüştür'}
                 </button>
