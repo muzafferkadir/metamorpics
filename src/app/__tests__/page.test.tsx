@@ -22,6 +22,24 @@ describe('Home - HEIC Support', () => {
     })
   })
 
+  it('should render the homepage slogan', async () => {
+    render(<Home />)
+    
+    await waitFor(() => {
+      expect(screen.getByText('Cool ideas for a smarter workflow.')).toBeInTheDocument()
+    })
+  })
+
+  it('should render slogan with correct accessibility attributes', async () => {
+    render(<Home />)
+    
+    await waitFor(() => {
+      const slogan = screen.getByText('Cool ideas for a smarter workflow.')
+      expect(slogan).toHaveAttribute('role', 'heading')
+      expect(slogan).toHaveAttribute('aria-level', '2')
+    })
+  })
+
   it('should accept HEIC files with .heic extension', async () => {
     render(<Home />)
     

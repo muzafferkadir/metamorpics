@@ -4,6 +4,7 @@ import { useCallback, useState, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { saveAs } from 'file-saver';
 import Image from 'next/image';
+import HomepageSlogan from '@/components/HomepageSlogan';
 
 // Types for dynamic imports
 interface ImageCompressionOptions {
@@ -266,6 +267,7 @@ export default function Home() {
           <h1 className="text-4xl font-bold text-center mb-8 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">
             Metamorpics
           </h1>
+          <HomepageSlogan locale="en" />
           <p className="text-center text-gray-400 mb-12">Fotoğraflarınızı kolayca farklı formatlara dönüştürün</p>
           
           {errorMessage && (
