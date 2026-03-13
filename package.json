@@ -18,7 +18,7 @@
     "clsx": "^2.1.1",
     "file-saver": "^2.0.5",
     "heic-to": "^1.1.6",
-    "next": "14.1.0",
+    "next": "^16.1.6",
     "react": "^18",
     "react-dom": "^18",
     "react-dropzone": "^14.2.3"
@@ -34,7 +34,7 @@
     "@types/react-dom": "^18",
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
-    "eslint-config-next": "14.1.0",
+    "eslint-config-next": "^16.1.6",
     "jest": "^30.2.0",
     "jest-environment-jsdom": "^30.2.0",
     "postcss": "^8",
